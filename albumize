@@ -217,6 +217,11 @@ albumize - Generate an HTML photo album for a set of images
 
  albumize -i input_dir -o output_dir [OPTIONS]
 
+ Options:
+     --nohtml       Do not generate HTML
+     --nothumbs     Do not generate thumbnails
+                    NOTE: Thumbnails must be in output_dir/thumbnails)
+
 =head1 AUTHORS
 
 Tim Cheadle <F<session@fourspace.com>>
