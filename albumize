@@ -8,11 +8,24 @@ Getopt::Long::Configure('bundling');
 use Pod::Usage;
 
 #
+# Binary locations
+#
+our $CONVERT  = '/usr/bin/convert';
+our $IDENTIFY = '/usr/bin/identify';
+
+#
 # Command line options
 #
+our $INPUT_DIR;
+our $OUTPUT_DIR;
+my $SKIP_THUMBS = 0;
+my $SKIP_HTML = 0;
+my $HELP;
 GetOptions(
 	'i=s' => \$INPUT_DIR,
 	'o=s' => \$OUTPUT_DIR,
+	'nothumbs' => \$SKIP_THUMBS,
+	'nohtml' => \$SKIP_HTML,
 	'help|?' => \$HELP,
 );
 pod2usage(1) if ($HELP || !($INPUT_DIR && $OUTPUT_DIR));
@@ -22,92 +35,175 @@ pod2usage(1) if ($HELP || !($INPUT_DIR && $OUTPUT_DIR));
 # Check input directory
 #
 die "Input directory '$INPUT_DIR' doesn't exist.\n" if (!(-d $INPUT_DIR));
+die "Output directory '$OUTPUT_DIR' doesn't exist.\n" if (!(-d $OUTPUT_DIR));
 
 #
-# Generate new directory names
+# Create directory variables
 #
-$PHOTO_DIR = "$OUTPUT_DIR/photos";
-$THUMB_DIR = "$OUTPUT_DIR/thumbnails";
+our $HTML_DIR  = 'html';
+our $PHOTO_DIR = 'photos';
+our $THUMB_DIR = 'thumbnails';
+our $FULL_HTML_DIR  = "$OUTPUT_DIR/$HTML_DIR";
+our $FULL_PHOTO_DIR = "$OUTPUT_DIR/$PHOTO_DIR";
+our $FULL_THUMB_DIR = "$OUTPUT_DIR/$THUMB_DIR";
+
 
 #
-# Make output directories
-mkdir($OUTPUT_DIR);
-mkdir($PHOTO_DIR);
-mkdir($THUMB_DIR);
+# Execute the program
+#
+createOutputDirs();
+createThumbnails() unless $SKIP_THUMBS;
+#createMediums();
+createIndexHTML() unless $SKIP_HTML;
+createPhotoHTML() unless $SKIP_HTML;
+
+exit 0;
+
+###############################################################################
 
 #
-# Start index HTML
+# Create the output directories (if necesssary)
 #
-startIndexHTML();
+sub createOutputDirs {
+    mkdir($OUTPUT_DIR);
+    mkdir($FULL_HTML_DIR);
+    mkdir($FULL_PHOTO_DIR);
+    mkdir($FULL_THUMB_DIR);
+}
 
 #
 # Create thumbnails
 #
-my @files = `ls -1 $INPUT_DIR`;
-foreach $file (@files) {
-	chomp $file;
+sub createThumbnails {
+	print "generating thumbnails...\n";
 
-	`cp $INPUT_DIR/$file $PHOTO_DIR/$file`;
-	
-	print "generating thumbnail: $THUMB_DIR/$file\n";
-	`convert -size 120x120 $INPUT_DIR/$file -resize 120x120 +profile \"*\" $THUMB_DIR/$file`;
+	my @files = `ls -1 $INPUT_DIR`;
+	foreach $file (@files) {
+		chomp $file;
+
+		`cp $INPUT_DIR/$file $FULL_PHOTO_DIR/$file`;
+		
+		print "\t$FULL_THUMB_DIR/$file\n";
+		`$CONVERT $INPUT_DIR/$file -resize x120 +profile \"*\" $FULL_THUMB_DIR/$file`;
+	}
 }
 
 
-#
-# Generate index HTML
-#
-startIndexHTML();
-printIndexTable();
-endIndexHTML();
-
-
-
-sub startIndexHTML {
+sub createIndexHTML {
+	print "generating index html...\n";
 	open(INDEXHTML, ">$OUTPUT_DIR/index.html") or die "Cannot open $OUTPUT_DIR/index.html: $!\n";
-	print INDEXHTML <<EOF;
+
+	print INDEXHTML startHTML();
+	print INDEXHTML "<h2>albumize</h2>\n";
+	
+	my @thumbs = `ls -1 $FULL_THUMB_DIR`;
+	my $pixels = 0;
+	foreach $thumb (sort @thumbs) {
+		chomp $thumb;
+
+		my @size = getImageSize("$FULL_THUMB_DIR/$thumb");
+		$pixels += $size[0];
+
+		if ($pixels >= 700) {
+			print INDEXHTML "<br>\n";
+			$pixels = 0;
+		}
+			
+		print INDEXHTML linkImage($thumb), "\n";
+	}
+
+	print INDEXHTML endHTML();
+
+	close(INDEXHTML);
+}
+
+sub createPhotoHTML {
+	print "generating photo html...\n";
+	my @thumbs = `ls -1 $FULL_THUMB_DIR`;
+
+	# Go through each thumbnail and create a webpage for it
+	my $i;
+	for ($i = 0; $i < @thumbs; $i++) {
+		my $thumb = $thumbs[$i];
+		chomp $thumb;
+
+		my $imageName = getImageName($thumb);
+		print "\t$FULL_HTML_DIR/$imageName.html\n";
+		open(PHTML, ">$FULL_HTML_DIR/$imageName.html") or die "Cannot open $FULL_HTML_DIR/$imageName.html: $!\n";
+
+		print PHTML startHTML();
+
+		# Print navigation bar
+		if ($i != 0) {
+			print PHTML "<a href=\"", getImageName($thumbs[$i-1]), ".html\">previous</a>&nbsp;&nbsp;&nbsp;";
+		} else {
+			print PHTML "<font color=#888888>previous</font>&nbsp;&nbsp;&nbsp;";
+		}
+		print PHTML "<a href=\"../index.html\">up</a>";
+		if ($i < $#thumbs) {
+			print PHTML "&nbsp;&nbsp;&nbsp;<a href=\"", getImageName($thumbs[$i+1]), ".html\">next</a>";
+		} else {
+			print PHTML "&nbsp;&nbsp;&nbsp;<font color=#888888>next</font>";
+		}
+
+		print PHTML "<p>\n";
+		print PHTML "<h2>$imageName</h2>\n";
+
+		# Print photo
+		print PHTML "<p>\n";
+		print PHTML "<img src=\"../$PHOTO_DIR/$thumb\" border=1>\n";
+
+		print PHTML endHTML();
+
+		close(PHTML);
+	}
+}
+
+#
+# Utility methods
+#
+sub startHTML {
+	return <<EOF;
 <html>
 <head>
 	<title>albumize</title>
 </head>
 
-<body bgcolor=#D6D6D6 text=#545454>
-<h2>albumize</h2>
+<body bgcolor=#D6D6D6
+    text=#545454
+    link=#444444
+    alink=#444444
+    vlink=#444444>
 EOF
 }
 
-sub printIndexTable {
-	print INDEXHTML "<table border=0 width=100%>\n";
-	
-	my @thumbs = `ls -1 $THUMB_DIR`;
-	for ($i = 0; $i < @thumbs; $i++) {
-		chomp $thumbs[$i];
-
-		if (($i % 5) == 0) {
-			print INDEXHTML "<tr>\n";
-		}
-		if (($i % 5) == 5) {
-			print INDEXHTML "</tr>\n";
-		}
-		print INDEXHTML "\t<td>\n";
-		print INDEXHTML "\t\t", linkImage($thumbs[$i]), "\n";
-		print INDEXHTML "\t</td>\n";
-	}
-
-	print INDEXHTML "</tr>\n";
-	print INDEXHTML "</table>\n";
+sub endHTML {
+	return "</body>\n</html>\n";
 }
 
-sub endIndexHTML {
-	print INDEXHTML "</body>\n";
-	print INDEXHTML "</html>\n";
+sub getImageName($) {
+	my $image = shift;
+	my $imageName = $image;
+	$imageName =~ s/\.[^.]+$//;
 
-	close(INDEXHTML);
+	return $imageName;
+}
+
+sub getImageSize($) {
+	my $file = shift;
+	
+	my $imageData = `$IDENTIFY $file`;
+	if ($imageData =~ /(\d+)x(\d+)/) {
+		return ($1, $2);
+	}
+
+	return undef;
 }
 
 sub linkImage ($) {
 	my $image = shift;
-	return "<a href=\"photos/$image\"><img src=\"thumbnails/$image\" border=0></a>";
+	my $imageName = getImageName($image);
+	return "<a href=\"$HTML_DIR/$imageName.html\"><img src=\"$THUMB_DIR/$image\" border=1></a>";
 }
 
 
