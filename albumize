@@ -2,6 +2,7 @@
 
 use warnings;
 
+use Cwd qw(abs_path);
 use Getopt::Long;
 use Pod::Usage;
 Getopt::Long::Configure('bundling');
@@ -11,11 +12,14 @@ Getopt::Long::Configure('bundling');
 #
 our $CONVERT  = `which convert`;
 our $IDENTIFY = `which identify`;
+our $JHEAD    = `which jhead`;
 chomp $CONVERT;
 chomp $IDENTIFY;
+chomp $JHEAD;
 
 die "'convert' command not found\n" unless $CONVERT;
 die "'identify' command not found\n" unless $IDENTIFY;
+die "'jhead' command not found\n" unless $JHEAD;
 
 #
 # Command line options
@@ -30,18 +34,20 @@ our $PRINT_EXIF = 0;
 our $SKIP_MEDIUMS = 0;
 my $SKIP_THUMBS = 0;
 my $SKIP_HTML = 0;
+my $SKIP_METADATA = 0;
 my $HELP;
 GetOptions(
 	'i=s' => \$INPUT_DIR,
 	'o=s' => \$OUTPUT_DIR,
 	'title|t=s' => \$ALBUM_TITLE,
     'width|w=i' => \$MAX_WIDTH,
-    'H=i' => \$MEDIUM_HEIGHT,
-    'W=i' => \$MEDIUM_WIDTH,
-    'nomediums' => \$SKIP_MEDIUMS,
-	'nothumbs' => \$SKIP_THUMBS,
-	'nohtml' => \$SKIP_HTML,
-    'exif' => \$PRINT_EXIF,
+    'h=i' => \$MEDIUM_HEIGHT,
+    'w=i' => \$MEDIUM_WIDTH,
+    'M|nomediums' => \$SKIP_MEDIUMS,
+	'T|nothumbs' => \$SKIP_THUMBS,
+	'H|nohtml' => \$SKIP_HTML,
+	'D|nometa' => \&SKIP_METADATA,
+    'e|exif' => \$PRINT_EXIF,
 	'help|?' => \$HELP,
 );
 pod2usage(1) if ($HELP || !($INPUT_DIR && $OUTPUT_DIR));
@@ -67,6 +73,7 @@ our $FULL_THUMB_DIR  = "$OUTPUT_DIR/$THUMB_DIR";
 # If title wasn't specified, default to the output directory name
 my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time());
 $year += 1900;
+$mon++;
 $mday = "0$mday" if $mday < 10;
 $mon  = "0$mon"  if $mon < 10;
 $ALBUM_TITLE = "albumize | $mon.$mday.$year" unless defined($ALBUM_TITLE);
@@ -80,6 +87,7 @@ createThumbnails() unless $SKIP_THUMBS;
 createMediums() unless $SKIP_MEDIUMS;
 createIndexHTML() unless $SKIP_HTML;
 createPhotoHTML() unless $SKIP_HTML;
+createMetadata() unless $SKIP_METADATA;
 
 exit 0;
 
@@ -140,7 +148,8 @@ sub createIndexHTML {
 	open(INDEXHTML, ">$OUTPUT_DIR/index.html") or die "Cannot open $OUTPUT_DIR/index.html: $!\n";
 
 	print INDEXHTML startHTML($ALBUM_TITLE);
-	print INDEXHTML "<h2>$ALBUM_TITLE</h2>\n";
+	#print INDEXHTML "<h2>$ALBUM_TITLE</h2>\n";
+	print INDEXHTML "<br>\n";
 	
 	my @thumbs = `ls -1 \"$FULL_THUMB_DIR\"`;
 	my $pixels = 0;
@@ -178,7 +187,7 @@ sub createPhotoHTML {
 		print "\t$FULL_HTML_DIR/$imageName.html\n";
 		open(PHTML, ">$FULL_HTML_DIR/$imageName.html") or die "Cannot open $FULL_HTML_DIR/$imageName.html: $!\n";
 
-		print PHTML startHTML("$ALBUM_TITLE: $imageName");
+		print PHTML startHTML($ALBUM_TITLE, $imageName);
 
 		# Print navigation bar
 		if ($i != 0) {
@@ -193,8 +202,8 @@ sub createPhotoHTML {
 			print PHTML "&nbsp;&nbsp;&nbsp;<font color=#888888>next</font>";
 		}
 
-		print PHTML "<p>\n";
-		print PHTML "<h2>$imageName</h2>\n";
+		#print PHTML "<p>\n";
+		#print PHTML "<h2>$imageName</h2>\n";
 
 		# Print photo
 		print PHTML "<p>\n";
@@ -206,13 +215,10 @@ sub createPhotoHTML {
         }
 
         if ($PRINT_EXIF) {
-            my %exif = exif_get_data("$FULL_PHOTO_DIR/$thumb");
+            my $exif = getExifData("$FULL_PHOTO_DIR/$thumb");
 
-            print PHTML "<hr>\n";
-            foreach my $key (sort keys %exif) {
-                print "$key = $exif{$key}\n";
-                print PHTML "$key: $exif{$key}<br>\n";
-            }
+            print PHTML "<hr width=360 align=left>\n";
+			print PHTML "$exif\n";
         }
 
 		print PHTML endHTML();
@@ -221,27 +227,88 @@ sub createPhotoHTML {
 	}
 }
 
+sub createMetadata {
+	open(META, ">$OUTPUT_DIR/.metadata") or die "Cannot open $OUTPUT_DIR/.metadata: $!\n";
+	print META "# albumize album\n\n";
+	print META "timestamp=". time() . "\n";
+	print META "title=$ALBUM_TITLE\n";
+	print META "abs_input_dir=". abs_path($INPUT_DIR) ."\n";
+	print META "rel_input_dir=$INPUT_DIR\n";
+	print META "abs_output_dir=". abs_path($OUTPUT_DIR) ."\n";
+	print META "rel_output_dir=$OUTPUT_DIR\n";
+	print META "thumbnails_dir=$THUMB_DIR\n";
+	print META "mediums_dir=$MEDIUM_DIR\n";
+	print META "html_dir=$HTML_DIR/html\n";
+	print META "photo_dir=$PHOTO_DIR\n";
+	print META "indexpage=$OUTPUT_DIR/index.html\n";
+	print META "exif=$PRINT_EXIF\n";
+	print META "\n";
+
+	# Print all the filenames we created
+	foreach my $dir (($FULL_HTML_DIR, $FULL_PHOTO_DIR, $FULL_MEDIUM_DIR, $FULL_THUMB_DIR)) {
+		foreach my $file (sort `ls -1 $dir`) {
+			chomp $file;
+			print META "created_file=$dir/$file\n";
+		}
+	}
+	close(META);
+}
+
 #
 # Utility methods
 #
-sub startHTML($) {
+sub startHTML {
     my $title = shift;
-	return <<EOF;
+	my $imageTitle = shift;
+	my $string = <<EOF;
 <html>
 <head>
-	<title>$title</title>
+EOF
+
+	if (defined($imageTitle)) {
+		$string .= "<title>fourspace | photos | $title | $imageTitle</title>\n";
+	} else {
+		$string .= "<title>fourspace | photos | $title</title>\n";
+	}
+	
+	$string .= <<EOF;
+	<link rel="stylesheet" href="/content.css">
 </head>
 
 <body bgcolor=#D6D6D6
     text=#545454
     link=#444444
     alink=#444444
-    vlink=#444444>
+    vlink=#444444
+    topmargin=0
+    leftmargin=0
+    marginheight=0
+    marginwidth=0>
+                                                                                
+<table class="navbar">
+<tr><td>
+    <a href="/">fourspace</a> |
+	<a href="/photos">photos</a> |
 EOF
+	if (defined($imageTitle)) {
+		$string .= "<a href=\"../index.html\">$title</a> |\n";
+		$string .= "$imageTitle\n";
+	} else {
+		$string .= "$title\n";
+	}
+	
+	$string .= <<EOF;
+</td></tr>
+</table>
+
+<div id="content">
+EOF
+
+	return $string;
 }
 
 sub endHTML {
-	return "</body>\n</html>\n";
+	return "</div>\n</body>\n</html>\n";
 }
 
 sub getImageName($) {
@@ -269,6 +336,37 @@ sub linkImage ($) {
 	return "<a href=\"$HTML_DIR/$imageName.html\"><img src=\"$THUMB_DIR/$image\" border=1></a>";
 }
 
+sub getExifData($) {
+	my $image = shift;
+	my $data = "";
+	open(JHEAD, "$JHEAD $image|") or die "Cannot open '$JHEAD $image': $!\n\n";
+	while(<JHEAD>) {
+		chomp;
+		if (/^([^:]+)\s+:\s+(.*)\s*$/) {
+			my ($key, $value) = ($1, $2);
+			next if ($key =~ /File name/i);
+			next if ($key =~ /File date/i);
+			next if ($key =~ /Camera Make/i);
+
+			# Format date/time
+			if ($key =~ /Date\/Time/i) {
+				my ($date, $time) = split(/\s+/, $value);
+				my ($year, $month, $day) = split(/:/, $date);
+				my ($hour, $min, $sec) = split(/:/, $time);
+				my $timeOfDay = ($hour < 12) ? "am" : "pm";
+				$hour -= 12 if ($hour > 12);
+				$hour = 12 if ($hour eq "00");
+				$hour = "0$hour" if ($hour < 10);
+			
+				$value = "$month/$day/$year, $hour:$min:$sec $timeOfDay EDT";
+			}
+
+			$data .= "$key: $value<br>";
+		}
+	}
+	return $data;
+}
+
 
 __END__
 
@@ -281,14 +379,15 @@ albumize - Generate an HTML photo album for a set of images
  albumize -i input_dir -o output_dir [OPTIONS]
 
  Options:
-     --title,-t     Album title
-     --width,-w     Maximum width (in pixels) for thumbnail rows
-     -H <height>    Maximum height (in pixels) for medium size images
-     --nohtml       Do not generate HTML
-     --nomediums    Do not generate medium size images
-     --nothumbs     Do not generate thumbnails
-                    NOTE: Thumbnails must be in output_dir/thumbnails)
-     --exif         Print EXIF metadata for applicable JPEGs
+     --title,-t         Album title
+     --width,-w         Maximum width (in pixels) for thumbnail rows
+     -h <height>        Maximum height (in pixels) for medium size images
+     -D, --nometa       Do not generate metadata file
+     -H, --nohtml       Do not generate HTML
+     -M, --nomediums    Do not generate medium size images
+     -T, --nothumbs     Do not generate thumbnails
+                        NOTE: Thumbnails must be in output_dir/thumbnails)
+     -e, --exif         Print EXIF metadata for applicable JPEGs
 
 =head1 AUTHORS
 
