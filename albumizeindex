@@ -83,7 +83,7 @@ sub printHTML {
 <table class="navbar">
 <tr><td>
     <a href="/">fourspace</a> |
-	$INDEX_TITLE |
+	$INDEX_TITLE
 </td></tr>
 </table>
 
