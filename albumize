@@ -3,9 +3,8 @@
 use warnings;
 
 use Getopt::Long;
-Getopt::Long::Configure('bundling');
-
 use Pod::Usage;
+Getopt::Long::Configure('bundling');
 
 #
 # Binary locations
@@ -27,6 +26,7 @@ our $ALBUM_TITLE;
 our $MAX_WIDTH = 700;
 our $MEDIUM_WIDTH  = 640;
 our $MEDIUM_HEIGHT = 480;
+our $PRINT_EXIF = 0;
 our $SKIP_MEDIUMS = 0;
 my $SKIP_THUMBS = 0;
 my $SKIP_HTML = 0;
@@ -41,6 +41,7 @@ GetOptions(
     'nomediums' => \$SKIP_MEDIUMS,
 	'nothumbs' => \$SKIP_THUMBS,
 	'nohtml' => \$SKIP_HTML,
+    'exif' => \$PRINT_EXIF,
 	'help|?' => \$HELP,
 );
 pod2usage(1) if ($HELP || !($INPUT_DIR && $OUTPUT_DIR));
@@ -101,7 +102,7 @@ sub createOutputDirs {
 sub createThumbnails {
 	print "generating thumbnails...\n";
 
-	my @files = `ls -1 $INPUT_DIR`;
+	my @files = `ls -1 \"$INPUT_DIR\"`;
 	foreach $file (@files) {
 		chomp $file;
 		my $newFile = $file;
@@ -117,7 +118,7 @@ sub createThumbnails {
 sub createMediums {
     print "generating medium size images...\n";
 
-	my @files = `ls -1 $FULL_PHOTO_DIR`;
+	my @files = `ls -1 \"$FULL_PHOTO_DIR\"`;
 	foreach $file (@files) {
 		chomp $file;
 
@@ -141,7 +142,7 @@ sub createIndexHTML {
 	print INDEXHTML startHTML($ALBUM_TITLE);
 	print INDEXHTML "<h2>$ALBUM_TITLE</h2>\n";
 	
-	my @thumbs = `ls -1 $FULL_THUMB_DIR`;
+	my @thumbs = `ls -1 \"$FULL_THUMB_DIR\"`;
 	my $pixels = 0;
 	foreach $thumb (sort @thumbs) {
 		chomp $thumb;
@@ -165,7 +166,7 @@ sub createIndexHTML {
 
 sub createPhotoHTML {
 	print "generating photo html...\n";
-	my @thumbs = `ls -1 $FULL_THUMB_DIR`;
+	my @thumbs = `ls -1 \"$FULL_THUMB_DIR\"`;
 
 	# Go through each thumbnail and create a webpage for it
 	my $i;
@@ -202,6 +203,16 @@ sub createPhotoHTML {
             print PHTML "<p><font size=-2>Click image to enlarge</font>\n";
         } else {
             print PHTML "<img src=\"../$PHOTO_DIR/$thumb\" border=1>\n";
+        }
+
+        if ($PRINT_EXIF) {
+            my %exif = exif_get_data("$FULL_PHOTO_DIR/$thumb");
+
+            print PHTML "<hr>\n";
+            foreach my $key (sort keys %exif) {
+                print "$key = $exif{$key}\n";
+                print PHTML "$key: $exif{$key}<br>\n";
+            }
         }
 
 		print PHTML endHTML();
@@ -277,6 +288,7 @@ albumize - Generate an HTML photo album for a set of images
      --nomediums    Do not generate medium size images
      --nothumbs     Do not generate thumbnails
                     NOTE: Thumbnails must be in output_dir/thumbnails)
+     --exif         Print EXIF metadata for applicable JPEGs
 
 =head1 AUTHORS
 
