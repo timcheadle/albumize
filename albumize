@@ -10,20 +10,35 @@ use Pod::Usage;
 #
 # Binary locations
 #
-our $CONVERT  = '/usr/bin/convert';
-our $IDENTIFY = '/usr/bin/identify';
+our $CONVERT  = `which convert`;
+our $IDENTIFY = `which identify`;
+chomp $CONVERT;
+chomp $IDENTIFY;
+
+die "'convert' command not found\n" unless $CONVERT;
+die "'identify' command not found\n" unless $IDENTIFY;
 
 #
 # Command line options
 #
 our $INPUT_DIR;
 our $OUTPUT_DIR;
+our $ALBUM_TITLE;
+our $MAX_WIDTH = 700;
+our $MEDIUM_WIDTH  = 640;
+our $MEDIUM_HEIGHT = 480;
+our $SKIP_MEDIUMS = 0;
 my $SKIP_THUMBS = 0;
 my $SKIP_HTML = 0;
 my $HELP;
 GetOptions(
 	'i=s' => \$INPUT_DIR,
 	'o=s' => \$OUTPUT_DIR,
+	'title|t=s' => \$ALBUM_TITLE,
+    'width|w=i' => \$MAX_WIDTH,
+    'H=i' => \$MEDIUM_HEIGHT,
+    'W=i' => \$MEDIUM_WIDTH,
+    'nomediums' => \$SKIP_MEDIUMS,
 	'nothumbs' => \$SKIP_THUMBS,
 	'nohtml' => \$SKIP_HTML,
 	'help|?' => \$HELP,
@@ -35,17 +50,25 @@ pod2usage(1) if ($HELP || !($INPUT_DIR && $OUTPUT_DIR));
 # Check input directory
 #
 die "Input directory '$INPUT_DIR' doesn't exist.\n" if (!(-d $INPUT_DIR));
-die "Output directory '$OUTPUT_DIR' doesn't exist.\n" if (!(-d $OUTPUT_DIR));
 
 #
 # Create directory variables
 #
-our $HTML_DIR  = 'html';
-our $PHOTO_DIR = 'photos';
-our $THUMB_DIR = 'thumbnails';
-our $FULL_HTML_DIR  = "$OUTPUT_DIR/$HTML_DIR";
-our $FULL_PHOTO_DIR = "$OUTPUT_DIR/$PHOTO_DIR";
-our $FULL_THUMB_DIR = "$OUTPUT_DIR/$THUMB_DIR";
+our $HTML_DIR   = 'html';
+our $PHOTO_DIR  = 'photos';
+our $MEDIUM_DIR = 'mediums';
+our $THUMB_DIR  = 'thumbnails';
+our $FULL_HTML_DIR   = "$OUTPUT_DIR/$HTML_DIR";
+our $FULL_PHOTO_DIR  = "$OUTPUT_DIR/$PHOTO_DIR";
+our $FULL_MEDIUM_DIR = "$OUTPUT_DIR/$MEDIUM_DIR";
+our $FULL_THUMB_DIR  = "$OUTPUT_DIR/$THUMB_DIR";
+
+# If title wasn't specified, default to the output directory name
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time());
+$year += 1900;
+$mday = "0$mday" if $mday < 10;
+$mon  = "0$mon"  if $mon < 10;
+$ALBUM_TITLE = "albumize | $mon.$mday.$year" unless defined($ALBUM_TITLE);
 
 
 #
@@ -53,7 +76,7 @@ our $FULL_THUMB_DIR = "$OUTPUT_DIR/$THUMB_DIR";
 #
 createOutputDirs();
 createThumbnails() unless $SKIP_THUMBS;
-#createMediums();
+createMediums() unless $SKIP_MEDIUMS;
 createIndexHTML() unless $SKIP_HTML;
 createPhotoHTML() unless $SKIP_HTML;
 
@@ -68,6 +91,7 @@ sub createOutputDirs {
     mkdir($OUTPUT_DIR);
     mkdir($FULL_HTML_DIR);
     mkdir($FULL_PHOTO_DIR);
+    mkdir($FULL_MEDIUM_DIR) unless $SKIP_MEDIUMS;
     mkdir($FULL_THUMB_DIR);
 }
 
@@ -80,33 +104,55 @@ sub createThumbnails {
 	my @files = `ls -1 $INPUT_DIR`;
 	foreach $file (@files) {
 		chomp $file;
+		my $newFile = $file;
+		$newFile =~ s/\s+/_/g;
 
-		`cp $INPUT_DIR/$file $FULL_PHOTO_DIR/$file`;
+		`cp \"$INPUT_DIR/$file\" $FULL_PHOTO_DIR/$newFile`;
 		
-		print "\t$FULL_THUMB_DIR/$file\n";
-		`$CONVERT $INPUT_DIR/$file -resize x120 +profile \"*\" $FULL_THUMB_DIR/$file`;
+		print "\t$FULL_THUMB_DIR/$newFile\n";
+		`$CONVERT $FULL_PHOTO_DIR/$newFile -resize x120 +profile \"*\" $FULL_THUMB_DIR/$newFile`;
 	}
 }
+
+sub createMediums {
+    print "generating medium size images...\n";
+
+	my @files = `ls -1 $FULL_PHOTO_DIR`;
+	foreach $file (@files) {
+		chomp $file;
+
+		print "\t$FULL_MEDIUM_DIR/$file\n";
+
+        my ($width, $height) = getImageSize("$FULL_PHOTO_DIR/$file");
+        my $newSize;
+        $newSize = $MEDIUM_WIDTH  .'x'. $MEDIUM_HEIGHT;
+        #$newSize = $MEDIUM_HEIGHT .'x'. $MEDIUM_WIDTH if ($height > $width);
+
+		`$CONVERT $FULL_PHOTO_DIR/$file -resize x$MEDIUM_HEIGHT +profile \"*\" $FULL_MEDIUM_DIR/$file`;
+    }
+}
+
 
 
 sub createIndexHTML {
 	print "generating index html...\n";
 	open(INDEXHTML, ">$OUTPUT_DIR/index.html") or die "Cannot open $OUTPUT_DIR/index.html: $!\n";
 
-	print INDEXHTML startHTML();
-	print INDEXHTML "<h2>albumize</h2>\n";
+	print INDEXHTML startHTML($ALBUM_TITLE);
+	print INDEXHTML "<h2>$ALBUM_TITLE</h2>\n";
 	
 	my @thumbs = `ls -1 $FULL_THUMB_DIR`;
 	my $pixels = 0;
 	foreach $thumb (sort @thumbs) {
 		chomp $thumb;
 
-		my @size = getImageSize("$FULL_THUMB_DIR/$thumb");
-		$pixels += $size[0];
+		my ($width, $height) = getImageSize("$FULL_THUMB_DIR/$thumb");
+		$pixels += $width;
+        print STDERR "\t pixels($pixels), w($width) h($height)\n";
 
-		if ($pixels >= 700) {
+		if ($pixels >= $MAX_WIDTH) {
 			print INDEXHTML "<br>\n";
-			$pixels = 0;
+			$pixels = $width;
 		}
 			
 		print INDEXHTML linkImage($thumb), "\n";
@@ -131,7 +177,7 @@ sub createPhotoHTML {
 		print "\t$FULL_HTML_DIR/$imageName.html\n";
 		open(PHTML, ">$FULL_HTML_DIR/$imageName.html") or die "Cannot open $FULL_HTML_DIR/$imageName.html: $!\n";
 
-		print PHTML startHTML();
+		print PHTML startHTML("$ALBUM_TITLE: $imageName");
 
 		# Print navigation bar
 		if ($i != 0) {
@@ -151,7 +197,12 @@ sub createPhotoHTML {
 
 		# Print photo
 		print PHTML "<p>\n";
-		print PHTML "<img src=\"../$PHOTO_DIR/$thumb\" border=1>\n";
+        if (-e "$FULL_MEDIUM_DIR/$thumb") {
+            print PHTML "<a href=\"../$PHOTO_DIR/$thumb\"><img src=\"../$MEDIUM_DIR/$thumb\" border=1></a>\n";
+            print PHTML "<p><font size=-2>Click image to enlarge</font>\n";
+        } else {
+            print PHTML "<img src=\"../$PHOTO_DIR/$thumb\" border=1>\n";
+        }
 
 		print PHTML endHTML();
 
@@ -162,11 +213,12 @@ sub createPhotoHTML {
 #
 # Utility methods
 #
-sub startHTML {
+sub startHTML($) {
+    my $title = shift;
 	return <<EOF;
 <html>
 <head>
-	<title>albumize</title>
+	<title>$title</title>
 </head>
 
 <body bgcolor=#D6D6D6
@@ -218,7 +270,11 @@ albumize - Generate an HTML photo album for a set of images
  albumize -i input_dir -o output_dir [OPTIONS]
 
  Options:
+     --title,-t     Album title
+     --width,-w     Maximum width (in pixels) for thumbnail rows
+     -H <height>    Maximum height (in pixels) for medium size images
      --nohtml       Do not generate HTML
+     --nomediums    Do not generate medium size images
      --nothumbs     Do not generate thumbnails
                     NOTE: Thumbnails must be in output_dir/thumbnails)
 
