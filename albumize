@@ -1,0 +1,126 @@
+#!/usr/bin/perl
+
+use warnings;
+
+use Getopt::Long;
+Getopt::Long::Configure('bundling');
+
+use Pod::Usage;
+
+#
+# Command line options
+#
+GetOptions(
+	'i=s' => \$INPUT_DIR,
+	'o=s' => \$OUTPUT_DIR,
+	'help|?' => \$HELP,
+);
+pod2usage(1) if ($HELP || !($INPUT_DIR && $OUTPUT_DIR));
+
+
+#
+# Check input directory
+#
+die "Input directory '$INPUT_DIR' doesn't exist.\n" if (!(-d $INPUT_DIR));
+
+#
+# Generate new directory names
+#
+$PHOTO_DIR = "$OUTPUT_DIR/photos";
+$THUMB_DIR = "$OUTPUT_DIR/thumbnails";
+
+#
+# Make output directories
+mkdir($OUTPUT_DIR);
+mkdir($PHOTO_DIR);
+mkdir($THUMB_DIR);
+
+#
+# Start index HTML
+#
+startIndexHTML();
+
+#
+# Create thumbnails
+#
+my @files = `ls -1 $INPUT_DIR`;
+foreach $file (@files) {
+	chomp $file;
+
+	`cp $INPUT_DIR/$file $PHOTO_DIR/$file`;
+	
+	print "generating thumbnail: $THUMB_DIR/$file\n";
+	`convert -size 120x120 $INPUT_DIR/$file -resize 120x120 +profile \"*\" $THUMB_DIR/$file`;
+}
+
+
+#
+# Generate index HTML
+#
+startIndexHTML();
+printIndexTable();
+endIndexHTML();
+
+
+
+sub startIndexHTML {
+	open(INDEXHTML, ">$OUTPUT_DIR/index.html") or die "Cannot open $OUTPUT_DIR/index.html: $!\n";
+	print INDEXHTML <<EOF;
+<html>
+<head>
+	<title>albumize</title>
+</head>
+
+<body bgcolor=#D6D6D6 text=#545454>
+<h2>albumize</h2>
+EOF
+}
+
+sub printIndexTable {
+	print INDEXHTML "<table border=0 width=100%>\n";
+	
+	my @thumbs = `ls -1 $THUMB_DIR`;
+	for ($i = 0; $i < @thumbs; $i++) {
+		chomp $thumbs[$i];
+
+		if (($i % 5) == 0) {
+			print INDEXHTML "<tr>\n";
+		}
+		if (($i % 5) == 5) {
+			print INDEXHTML "</tr>\n";
+		}
+		print INDEXHTML "\t<td>\n";
+		print INDEXHTML "\t\t", linkImage($thumbs[$i]), "\n";
+		print INDEXHTML "\t</td>\n";
+	}
+
+	print INDEXHTML "</tr>\n";
+	print INDEXHTML "</table>\n";
+}
+
+sub endIndexHTML {
+	print INDEXHTML "</body>\n";
+	print INDEXHTML "</html>\n";
+
+	close(INDEXHTML);
+}
+
+sub linkImage ($) {
+	my $image = shift;
+	return "<a href=\"photos/$image\"><img src=\"thumbnails/$image\" border=0></a>";
+}
+
+
+__END__
+
+=head1 NAME
+
+albumize - Generate an HTML photo album for a set of images
+
+=head1 SYNOPSIS
+
+ albumize -i input_dir -o output_dir [OPTIONS]
+
+=head1 AUTHORS
+
+Tim Cheadle <F<session@fourspace.com>>
