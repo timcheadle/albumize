@@ -137,7 +137,13 @@ sub createMediums {
         $newSize = $MEDIUM_WIDTH  .'x'. $MEDIUM_HEIGHT;
         #$newSize = $MEDIUM_HEIGHT .'x'. $MEDIUM_WIDTH if ($height > $width);
 
-		`$CONVERT $FULL_PHOTO_DIR/$file -resize x$MEDIUM_HEIGHT +profile \"*\" $FULL_MEDIUM_DIR/$file`;
+		# If the original image is larger than the medium height, resize it
+		# Otherwise we don't need to do anything (since we don't want to -expand- pictures
+		if ($height > $MEDIUM_HEIGHT) {
+			`$CONVERT $FULL_PHOTO_DIR/$file -resize x$MEDIUM_HEIGHT +profile \"*\" $FULL_MEDIUM_DIR/$file`;
+		} else {
+			`cp $FULL_PHOTO_DIR/$file $FULL_MEDIUM_DIR/$file`;
+		}
     }
 }
 

@@ -1,0 +1,113 @@
+#!/usr/bin/perl
+
+# Builds an index of all photo albums created by albumize
+# in the current directory.  It looks for a '.metadata'
+# file in the directory in order to get album details.
+#
+# Note: the output uses Server-Side Includes, so be sure
+# to take appropriate measures to display them
+
+use strict;
+use warnings;
+
+use Date::Manip;
+
+our $ALBUMS;
+
+# Check cmdline args
+die "Usage: albumizeindex <index_title>\n" if (@ARGV != 1);
+our $INDEX_TITLE = $ARGV[0];
+
+foreach my $dir (`ls -1`) {
+	chomp $dir;
+	if (-d $dir) {
+		if (-e "$dir/.metadata") {
+			readMetadata($dir);
+		} else {
+			print STDERR "$dir: .metadata file not found\n";
+			$ALBUMS->{$dir} = undef;
+		}
+	}
+}
+
+#printMetadata();
+printHTML();
+exit(0);
+
+
+
+
+sub readMetadata {
+	my $dir = shift;
+	
+	open(META, "$dir/.metadata") or die "Cannot open '$dir/.metadata': $!\n";
+	while(<META>) {
+		chomp;
+		if (/^(\S+)=(.*)$/) {
+			my ($key, $value) = ($1, $2);
+
+			if ($key ne "created_file") {
+				$ALBUMS->{$dir}->{$key} = $value;
+			}
+		}
+	}
+	close(META);
+}
+
+sub printMetadata {
+	foreach my $dir (sort keys %$ALBUMS) {
+		foreach my $key (sort keys %{$ALBUMS->{$dir}}) {
+			print "$dir: $key = $ALBUMS->{$dir}->{$key}\n";
+		}
+	}
+}
+
+sub printHTML {
+	my $html = <<EOF;
+<html>
+<head>
+	<title>fourspace | $INDEX_TITLE</title>
+	<link rel="stylesheet" href="/content.css">
+</head>
+
+<body bgcolor=#D6D6D6
+    text=#545454
+    link=#444444
+    alink=#444444
+    vlink=#444444
+    topmargin=0
+    leftmargin=0
+    marginheight=0
+    marginwidth=0>
+
+<table class="navbar">
+<tr><td>
+    <a href="/">fourspace</a> |
+	$INDEX_TITLE |
+</td></tr>
+</table>
+
+<div id="content">
+<ul>
+EOF
+
+	foreach my $dir (sort keys %$ALBUMS) {
+		if (defined($ALBUMS->{$dir})) {
+			my $date = UnixDate("epoch $ALBUMS->{$dir}->{timestamp}", '%m/%d/%Y');
+			$html .= "    <li><a href=\"$dir\">$ALBUMS->{$dir}->{title}</a> ($date)\n";
+		} else {
+			$html .= "    <li><a href=\"$dir\">$dir</a>\n";
+		}
+	}
+
+	$html .= <<EOF;
+</ul>
+<p>
+<font size="-2">Last updated <!--#echo var="LAST_MODIFIED" --></font>
+</div>
+</body>
+</html>
+EOF
+
+	print $html;
+}
