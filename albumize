@@ -22,6 +22,11 @@ die "'identify' command not found\n" unless $IDENTIFY;
 die "'jhead' command not found\n" unless $JHEAD;
 
 #
+# Image extensions
+#
+our $EXTENSIONS = join("|", qw( gif jpg jpeg png ));
+
+#
 # Command line options
 #
 our $INPUT_DIR;
@@ -110,7 +115,7 @@ sub createOutputDirs {
 sub createThumbnails {
 	print "generating thumbnails...\n";
 
-	my @files = `ls -1 \"$INPUT_DIR\"`;
+	my @files = `ls -1 \"$INPUT_DIR\" | egrep -i \"$EXTENSIONS\"`;
 	foreach $file (@files) {
 		chomp $file;
 		my $newFile = $file;

@@ -94,7 +94,7 @@ EOF
 	foreach my $dir (sort keys %$ALBUMS) {
 		if (defined($ALBUMS->{$dir})) {
 			my $date = UnixDate("epoch $ALBUMS->{$dir}->{timestamp}", '%m/%d/%Y');
-			$html .= "    <li><a href=\"$dir\">$ALBUMS->{$dir}->{title}</a> ($date)\n";
+			$html .= "    <li><a href=\"$dir\">$ALBUMS->{$dir}->{title}</a> (created: $date)\n";
 		} else {
 			$html .= "    <li><a href=\"$dir\">$dir</a>\n";
 		}
